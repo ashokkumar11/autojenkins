@@ -145,7 +145,26 @@ class Jenkins(object):
         """
         return self._http_post(self._url(url_pattern, *args), **kwargs)
 
-    def all_jobs(self, include_colorless=False):
+    def _get_crumb(self):
+        """
+        Get crumb token required when the option
+        'Prevent Cross Site Request Forgery exploits' is enable
+        in the global security section of Jenkins.
+        """
+        CRUMB='{0}/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,":",//crumb)'
+
+        response = self._build_get(CRUMB)
+        return response.text
+
+    def _get_crumb_as_dict(self):
+        crumb = self._get_crumb()
+        return {crumb.split(":")[0]:crumb.split(":")[1]}
+
+    def _add_crumb_to_header(self, header):
+        header.update(self._get_crumb_as_dict())
+        return header
+
+    def all_jobs(self, include_colorless=True):
         """
         Get a list of tuples with (name, color) of all jobs in the server.
 
@@ -255,9 +274,11 @@ class Jenkins(object):
         """
         Replace the ``config.xml`` of an existing job.
         """
+
+        header = self._add_crumb_to_header({'Content-Type': 'application/xml'})
         return self._build_post(CONFIG, jobname,
                                 data=config,
-                                headers={'Content-Type': 'application/xml'})
+                                headers=header)
 
     def create(self, jobname, config_file, **context):
         """
@@ -273,11 +294,11 @@ class Jenkins(object):
         if self.job_exists(jobname):
             raise Exception("Job already exists")
         else:
+            header = self._add_crumb_to_header({'Content-Type': 'application/xml'})
             return self._build_post(NEWJOB,
                                     data=content,
                                     params=params,
-                                    headers={'Content-Type': 'application/xml'}
-                                    )
+                                    headers=header)
 
     def create_copy(self, jobname, template_job, enable=True, _force=False, **context):
         """
@@ -308,27 +329,31 @@ class Jenkins(object):
         if target_job_exists:
             return self.set_config_xml(jobname, config)
         else:
+            header = self._add_crumb_to_header({'Content-Type': 'application/xml'})
             return self._build_post(NEWJOB,
                                     data=config,
                                     params={'name': jobname},
-                                    headers={'Content-Type': 'application/xml'})
+                                    headers=header)
 
     def transfer(self, jobname, to_server):
         """
         Copy a job to another server.
         """
         config = self.get_config_xml(jobname)
+        header = self._add_crumb_to_header({'Content-Type': 'application/xml'})
         return self._http_post(self._other_url(to_server, NEWJOB),
                                data=config,
                                params={'name': jobname},
-                               headers={'Content-Type': 'application/xml'})
+                               headers=header)
 
     def copy(self, jobname, copy_from='template'):
         """
         Copy a job from another one (by default from one called ``template``).
         """
         params = {'name': jobname, 'mode': 'copy', 'from': copy_from}
-        return self._build_post(NEWJOB, params=params)
+        return self._build_post(NEWJOB,
+                                params=params,
+                                headers=self._get_crumb_as_dict())
 
     def build(self, jobname, params=None, wait=False, grace=10):
         """
@@ -345,7 +370,10 @@ class Jenkins(object):
             raise JobNotBuildable("Job '%s' is not buildable (deactivated)."
                                   % jobname)
         url_pattern = BUILD if params is None else BUILD_WITH_PARAMS
-        response = self._build_post(url_pattern, jobname, params=params)
+        response = self._build_post(url_pattern,
+                                    jobname,
+                                    params=params,
+                                    headers=self._get_crumb_as_dict())
         if not wait:
             return response
         else:
@@ -358,7 +386,9 @@ class Jenkins(object):
         Delete a job.
         """
         if self.job_exists(jobname):
-            return self._build_post(DELETE, jobname)
+            return self._build_post(DELETE,
+                                    jobname,
+                                    headers=self._get_crumb_as_dict())
         else:
             raise JobInexistent("Job '%s' doesn't exist" % jobname)
 
@@ -366,13 +396,17 @@ class Jenkins(object):
         """
         Trigger Jenkins to enable a job.
         """
-        return self._build_post(ENABLE, jobname)
+        return self._build_post(ENABLE,
+                                jobname,
+                                headers=self._get_crumb_as_dict())
 
     def disable(self, jobname):
         """
         Trigger Jenkins to disable a job.
         """
-        return self._build_post(DISABLE, jobname)
+        return self._build_post(DISABLE,
+                                jobname,
+                                headers=self._get_crumb_as_dict())
 
     def is_building(self, jobname):
         """
@@ -389,3 +423,11 @@ class Jenkins(object):
             sys.stdout.write('.')
             sys.stdout.flush()
         print('')
+
+    def get_crumb(self):
+        """
+        Get crumb token required when the option
+        'Prevent Cross Site Request Forgery exploits' is enable
+        in the global security section of Jenkins.
+        """
+        return self._get_crumb()

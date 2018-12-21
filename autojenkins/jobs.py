@@ -162,6 +162,7 @@ class Jenkins(object):
         for (name, color) in jobs:
             if name == jobname:
                 return True
+        return False
 
     def job_url(self, jobname):
         """
